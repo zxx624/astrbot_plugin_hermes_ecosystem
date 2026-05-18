@@ -817,3 +817,22 @@ auto_sync_provider_on_startup = false
 ## 热重载说明
 
 AstrBot 热重载插件时，Provider 适配器可能已经存在。插件会自动替换同名的旧 `hermes_chat_completion` 适配器，避免重复注册报错或继续使用旧代码。
+
+
+## v0.2.6 重要变化：尽量只在插件里完成切换
+
+新版默认把 `enable_provider` 和 `set_as_default_provider` 打开。普通用户只需要：
+
+1. 在插件配置页确认 `api_base = http://127.0.0.1:8642/v1`。
+2. 如果 Hermes API Server 没设置 key，`api_key` 留空；如果设置了 key，就填 API key。
+3. 模型名保持 `hermes-agent`。
+4. 在聊天里执行 `/hermes安装提供商`。
+5. 重启 AstrBot。
+6. 执行 `/hermes状态`，看到“是否正在默认使用 Hermes: 是”。
+
+新版默认 `use_builtin_openai_adapter = true`，也就是用 AstrBot 内置 `openai_chat_completion` 适配 Hermes 的 OpenAI-compatible API。这样更稳，不需要用户去 AstrBot 其它地方手动添加 provider，也避免自定义适配器在某些 AstrBot 版本里遇到 `TextPart is not JSON serializable`。如果你确实要测试插件内置的 `hermes_chat_completion` 适配器，可以把这个选项关掉。
+
+
+## v0.2.7 修复：本机 Hermes 无 key 也能用
+
+AstrBot 内置 OpenAI 适配器要求 `api_key` 非空，但本机 Hermes API Server 通常不校验 key。新版默认填入占位值 `sk-hermes-local`，这样用户不需要去系统环境变量或 AstrBot 其它地方额外配置。若你的 Hermes API Server 设置了真实 API key，把插件配置里的 `api_key` 改成真实 key 即可。

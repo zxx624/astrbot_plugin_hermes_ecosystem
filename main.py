@@ -125,6 +125,69 @@ def _resolve_env_ref(value: str) -> str:
     return value
 
 
+def _safe_json_value(value: Any) -> Any:
+    """Convert AstrBot/Pydantic message objects into OpenAI JSON-safe values."""
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, dict):
+        return {str(k): _safe_json_value(v) for k, v in value.items() if v is not None}
+    if isinstance(value, (list, tuple, set)):
+        return [_safe_json_value(v) for v in value if v is not None]
+    for method in ("model_dump", "dict", "to_dict"):
+        fn = getattr(value, method, None)
+        if callable(fn):
+            try:
+                dumped = fn()
+                if dumped is not value:
+                    return _safe_json_value(dumped)
+            except Exception:
+                pass
+    if hasattr(value, "text"):
+        try:
+            return str(getattr(value, "text") or "")
+        except Exception:
+            pass
+    if hasattr(value, "content"):
+        try:
+            return _safe_json_value(getattr(value, "content"))
+        except Exception:
+            pass
+    return str(value)
+
+
+def _content_to_openai_text(value: Any) -> str:
+    """Flatten AstrBot message/content parts to plain text for Hermes API compatibility."""
+    value = _safe_json_value(value)
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, list):
+        parts: list[str] = []
+        for item in value:
+            if isinstance(item, dict):
+                typ = str(item.get("type") or "").lower()
+                if typ in {"text", "input_text"}:
+                    parts.append(str(item.get("text") or item.get("content") or ""))
+                elif "text" in item:
+                    parts.append(str(item.get("text") or ""))
+                elif "content" in item:
+                    parts.append(_content_to_openai_text(item.get("content")))
+            else:
+                parts.append(_content_to_openai_text(item))
+        return "\n".join(x for x in parts if x)
+    if isinstance(value, dict):
+        if "text" in value:
+            return str(value.get("text") or "")
+        if "content" in value:
+            return _content_to_openai_text(value.get("content"))
+    return str(value)
+
+
+def _json_dumps_strict(data: Any) -> str:
+    return json.dumps(_safe_json_value(data), ensure_ascii=False, separators=(",", ":"))
+
+
 def _data_dir_from_file() -> Path:
     """Best-effort AstrBot data directory discovery from plugin file path."""
     current = Path(__file__).resolve()
@@ -163,7 +226,7 @@ def _effective_config(config: dict[str, Any] | None = None) -> dict[str, Any]:
         "provider_id": str(merged.get("provider_id") or "hermes_agent"),
         "enable_provider": _as_bool(merged.get("enable_provider"), False),
         "api_base": _normalize_api_base(merged.get("api_base") or DEFAULT_API_BASE),
-        "api_key": str(merged.get("api_key") or ""),
+        "api_key": str(merged.get("api_key") if merged.get("api_key") is not None else "sk-hermes-local"),
         "model": str(merged.get("model") or DEFAULT_MODEL),
         "timeout": _as_int(merged.get("timeout"), 300),
         "streaming_response": _as_bool(merged.get("streaming_response"), True),
@@ -174,7 +237,8 @@ def _effective_config(config: dict[str, Any] | None = None) -> dict[str, Any]:
         "install_model_entry": _as_bool(merged.get("install_model_entry"), True),
         "set_as_default_provider": _as_bool(merged.get("set_as_default_provider"), False),
         "disable_other_chat_models": _as_bool(merged.get("disable_other_chat_models"), False),
-        "model_modalities": _parse_json_object(merged.get("model_modalities_json") or merged.get("model_modalities"), {"items": ["text", "tool_use"]}).get("items", ["text", "tool_use"]),
+        "use_builtin_openai_adapter": _as_bool(merged.get("use_builtin_openai_adapter"), True),
+        "model_modalities": _parse_json_object(merged.get("model_modalities_json") or merged.get("model_modalities"), {"items": ["text"]}).get("items", ["text"]),
         "max_context_tokens": _as_int(merged.get("max_context_tokens"), 0),
         "auto_sync_provider_on_startup": _as_bool(merged.get("auto_sync_provider_on_startup"), False),
     }
@@ -183,16 +247,24 @@ def _effective_config(config: dict[str, Any] | None = None) -> dict[str, Any]:
 def build_provider_config(config: dict[str, Any] | None = None, mask_secret: bool = False) -> dict[str, Any]:
     cfg = _effective_config(config)
     api_key = cfg["api_key"]
-    if mask_secret and api_key and not api_key.startswith("$"):
+    # AstrBot's built-in OpenAI adapter requires a non-empty key even when the
+    # local Hermes API server does not check Authorization. Use a harmless
+    # placeholder by default so users do not have to configure anything outside
+    # this plugin. If their Hermes API Server enforces a key, they can replace it.
+    if cfg.get("use_builtin_openai_adapter") and not _resolve_env_ref(str(api_key or "")):
+        api_key = "sk-hermes-local"
+    if mask_secret and api_key and not str(api_key).startswith("$"):
         api_key = "***已隐藏***"
     provider_config = {
         "id": cfg["provider_id"],
-        "type": PROVIDER_TYPE,
+        "type": "openai_chat_completion" if cfg.get("use_builtin_openai_adapter") else PROVIDER_TYPE,
         "provider_type": "chat_completion",
-        "provider": "hermes",
+        "provider": "openai" if cfg.get("use_builtin_openai_adapter") else "hermes",
         "enable": cfg["enable_provider"],
         "key": [api_key] if api_key else [],
+        "api_key": api_key,
         "api_base": cfg["api_base"],
+        "base_url": cfg["api_base"],
         "model": cfg["model"],
         "timeout": cfg["timeout"],
         "streaming_response": cfg["streaming_response"],
@@ -330,19 +402,19 @@ class HermesChatCompletionProvider(Provider):
     @staticmethod
     def _message_to_dict(message: Any) -> dict[str, Any] | None:
         if isinstance(message, dict):
-            return {"role": message.get("role", "user"), "content": message.get("content") or ""}
+            return {"role": message.get("role", "user"), "content": _content_to_openai_text(message.get("content") or "")}
         for method in ("to_openai_message", "to_dict"):
             fn = getattr(message, method, None)
             if callable(fn):
                 try:
                     value = fn()
                     if isinstance(value, dict):
-                        return {"role": value.get("role", "user"), "content": value.get("content") or ""}
+                        return {"role": value.get("role", "user"), "content": _content_to_openai_text(value.get("content") or "")}
                 except Exception:
                     pass
         role = getattr(message, "role", "user")
         content = getattr(message, "content", None) or getattr(message, "text", None) or str(message)
-        return {"role": role, "content": content}
+        return {"role": role, "content": _content_to_openai_text(content)}
 
     def _build_messages(
         self,
@@ -362,7 +434,7 @@ class HermesChatCompletionProvider(Provider):
         if prompt:
             user_content = prompt
             if extra_user_content_parts:
-                extra_text = "\n".join(str(part) for part in extra_user_content_parts if part is not None)
+                extra_text = "\n".join(_content_to_openai_text(part) for part in extra_user_content_parts if part is not None)
                 if extra_text:
                     user_content += "\n" + extra_text
             messages.append({"role": "user", "content": user_content})
@@ -387,13 +459,13 @@ class HermesChatCompletionProvider(Provider):
         }
         for key in ("temperature", "top_p", "max_tokens", "presence_penalty", "frequency_penalty"):
             if key in kwargs and kwargs[key] is not None:
-                payload[key] = kwargs[key]
+                payload[key] = _safe_json_value(kwargs[key])
             elif key in self.provider_config and self.provider_config[key] is not None:
                 payload[key] = self.provider_config[key]
         extra_body = self.provider_config.get("extra_body") or _effective_config().get("extra_body") or {}
         if isinstance(extra_body, dict):
-            payload.update(extra_body)
-        return payload
+            payload.update(_safe_json_value(extra_body))
+        return _safe_json_value(payload)
 
     @staticmethod
     def _extract_text(data: dict[str, Any]) -> str:
@@ -433,7 +505,7 @@ class HermesChatCompletionProvider(Provider):
             logger.warning("Hermes provider passes text fields only; multimodal support depends on the Hermes API server.")
         payload = self._build_payload(prompt, contexts, system_prompt, model, extra_user_content_parts, stream=False, **kwargs)
         url = f"{self.api_base}/chat/completions"
-        r = await self.client.post(url, headers=self._headers(), json=payload)
+        r = await self.client.post(url, headers=self._headers(), content=_json_dumps_strict(payload))
         r.raise_for_status()
         data = r.json()
         text = self._extract_text(data)
@@ -456,7 +528,7 @@ class HermesChatCompletionProvider(Provider):
     ) -> AsyncGenerator[LLMResponse, None]:
         payload = self._build_payload(prompt, contexts, system_prompt, model, extra_user_content_parts, stream=True, **kwargs)
         url = f"{self.api_base}/chat/completions"
-        async with self.client.stream("POST", url, headers=self._headers(), json=payload) as r:
+        async with self.client.stream("POST", url, headers=self._headers(), content=_json_dumps_strict(payload)) as r:
             r.raise_for_status()
             async for line in r.aiter_lines():
                 if not line:
