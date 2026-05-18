@@ -171,6 +171,11 @@ def _effective_config(config: dict[str, Any] | None = None) -> dict[str, Any]:
         "max_tokens": _as_int(merged.get("max_tokens"), 4096),
         "custom_headers": _parse_json_object(merged.get("custom_headers_json") or merged.get("custom_headers"), {}),
         "extra_body": _parse_json_object(merged.get("extra_body_json") or merged.get("extra_body"), {}),
+        "install_model_entry": _as_bool(merged.get("install_model_entry"), True),
+        "set_as_default_provider": _as_bool(merged.get("set_as_default_provider"), False),
+        "disable_other_chat_models": _as_bool(merged.get("disable_other_chat_models"), False),
+        "model_modalities": _parse_json_object(merged.get("model_modalities_json") or merged.get("model_modalities"), {"items": ["text", "tool_use"]}).get("items", ["text", "tool_use"]),
+        "max_context_tokens": _as_int(merged.get("max_context_tokens"), 0),
         "auto_sync_provider_on_startup": _as_bool(merged.get("auto_sync_provider_on_startup"), False),
     }
 
@@ -195,8 +200,29 @@ def build_provider_config(config: dict[str, Any] | None = None, mask_secret: boo
         "max_tokens": cfg["max_tokens"],
         "custom_headers": cfg["custom_headers"],
         "extra_body": cfg["extra_body"],
+        # Some AstrBot versions build selectable model entries from provider_sources[...].models.
+        # Keep this here so Hermes appears in WebUI even before users add a separate provider item.
+        "models": [cfg["model"]],
     }
     return provider_config
+
+
+def build_chat_model_config(config: dict[str, Any] | None = None) -> dict[str, Any]:
+    cfg = _effective_config(config)
+    provider_id = cfg["provider_id"]
+    model = cfg["model"]
+    modalities = cfg.get("model_modalities")
+    if not isinstance(modalities, list) or not modalities:
+        modalities = ["text", "tool_use"]
+    return {
+        "id": f"{provider_id}/{model}",
+        "enable": True,
+        "provider_source_id": provider_id,
+        "model": model,
+        "modalities": [str(x) for x in modalities],
+        "custom_extra_body": cfg.get("extra_body") or {},
+        "max_context_tokens": cfg.get("max_context_tokens") or 0,
+    }
 
 
 DEFAULT_PROVIDER_CONFIG = build_provider_config(
@@ -466,7 +492,7 @@ class HermesEcosystemPlugin(Star):
     def _cfg(self) -> dict[str, Any]:
         return _effective_config(self.config)
 
-    def _sync_provider_config(self) -> tuple[bool, str]:
+    def _sync_provider_config(self, force_default: bool = False) -> tuple[bool, str]:
         path = _cmd_config_path()
         if not path.exists():
             return False, f"cmd_config.json not found: {path}"
@@ -477,22 +503,59 @@ class HermesEcosystemPlugin(Star):
         sources = data.setdefault("provider_sources", [])
         if not isinstance(sources, list):
             return False, "provider_sources is not a list"
-        new_item = build_provider_config(self.config, mask_secret=False)
-        provider_id = new_item["id"]
-        replaced = False
+        models = data.setdefault("provider", [])
+        if not isinstance(models, list):
+            return False, "provider is not a list"
+        provider_settings = data.setdefault("provider_settings", {})
+        if not isinstance(provider_settings, dict):
+            return False, "provider_settings is not an object"
+
+        cfg = self._cfg()
+        new_source = build_provider_config(self.config, mask_secret=False)
+        new_source["enable"] = True if (force_default or cfg["set_as_default_provider"]) else cfg["enable_provider"]
+        provider_id = new_source["id"]
+        source_replaced = False
         for index, item in enumerate(sources):
             if isinstance(item, dict) and item.get("id") == provider_id:
-                sources[index] = new_item
-                replaced = True
+                sources[index] = new_source
+                source_replaced = True
                 break
-        if not replaced:
-            sources.append(new_item)
+        if not source_replaced:
+            sources.append(new_source)
+
+        model_msg = "model entry skipped"
+        default_msg = "default unchanged"
+        model_entry = build_chat_model_config(self.config)
+        chat_model_id = model_entry["id"]
+        if cfg["install_model_entry"] or force_default or cfg["set_as_default_provider"]:
+            model_replaced = False
+            for index, item in enumerate(models):
+                if isinstance(item, dict) and item.get("id") == chat_model_id:
+                    models[index] = model_entry
+                    model_replaced = True
+                    break
+            if not model_replaced:
+                models.append(model_entry)
+            model_msg = ("updated" if model_replaced else "added") + f" chat model '{chat_model_id}'"
+
+        if force_default or cfg["set_as_default_provider"]:
+            provider_settings["enable"] = True
+            provider_settings["default_provider_id"] = chat_model_id
+            pool = provider_settings.get("provider_pool")
+            if isinstance(pool, list) and "*" not in pool and chat_model_id not in pool:
+                pool.append(chat_model_id)
+            if cfg["disable_other_chat_models"]:
+                for item in models:
+                    if isinstance(item, dict) and item.get("provider_source_id") and item.get("id") != chat_model_id:
+                        item["enable"] = False
+            default_msg = f"default set to '{chat_model_id}'"
+
         backup = path.with_suffix(path.suffix + ".bak.hermes")
         if not backup.exists():
             backup.write_text(path.read_text(encoding="utf-8-sig"), encoding="utf-8")
         path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-        action = "updated" if replaced else "added"
-        return True, f"{action} provider '{provider_id}' in {path}"
+        source_action = "updated" if source_replaced else "added"
+        return True, f"{source_action} provider source '{provider_id}', {model_msg}, {default_msg} in {path}"
 
     @filter.command("hermes生态")
     async def hermes_ecosystem(self, event: AstrMessageEvent):
@@ -502,7 +565,7 @@ class HermesEcosystemPlugin(Star):
             "2. 连接参数都在插件配置页填写：api_base、api_key、model、provider_id 等。\n"
             "3. AstrBot 负责 QQ/群聊/插件事件，Hermes 负责模型路由、skills、tools、多 Agent、定时任务等。\n"
             "4. 发布版源码不内置任何真实 URL、Key、Token。\n\n"
-            "命令：/hermes配置、/hermes安装提供商、/hermes健康、/hermes生态\n"
+            "命令：/hermes配置、/hermes安装提供商、/hermes切换默认、/hermes状态、/hermes健康、/hermes生态\n"
             "提供商类型：hermes_chat_completion"
         )
         yield event.plain_result(text)
@@ -527,7 +590,7 @@ class HermesEcosystemPlugin(Star):
             "```json\n"
             + json.dumps(sample, ensure_ascii=False, indent=2)
             + "\n```\n"
-            "执行 /hermes安装提供商 可把它写入 cmd_config.json，然后重启 AstrBot 生效。"
+            "执行 /hermes安装提供商 会写入 provider source + 模型条目；执行 /hermes切换默认 会直接把 AstrBot 默认聊天模型切到 Hermes。"
         )
         yield event.plain_result(text)
 
@@ -538,10 +601,50 @@ class HermesEcosystemPlugin(Star):
             yield event.plain_result(
                 "Hermes Provider 配置已写入。\n"
                 f"{msg}\n"
-                "请在 AstrBot WebUI 重启/重载，或重启 AstrBot 服务后，在模型提供商里选择这个 provider。"
+                "已写入 provider source 和模型条目。若配置里 set_as_default_provider=false，则还需执行 /hermes切换默认 或在 WebUI 选择 Hermes 模型。重启 AstrBot 后生效。"
             )
         else:
             yield event.plain_result(f"Hermes Provider 配置写入失败：{msg}")
+
+
+    @filter.command("hermes切换默认")
+    async def hermes_set_default(self, event: AstrMessageEvent):
+        ok, msg = self._sync_provider_config(force_default=True)
+        if ok:
+            cfg = self._cfg()
+            yield event.plain_result(
+                "已把 AstrBot 默认聊天模型切换到 Hermes。\n"
+                f"默认模型：{cfg['provider_id']}/{cfg['model']}\n"
+                f"{msg}\n"
+                "请重启 AstrBot 服务后测试一次普通 @ 对话；日志应显示 Selected hermes_chat_completion(... ) as default chat model provider。"
+            )
+        else:
+            yield event.plain_result(f"切换默认模型失败：{msg}")
+
+    @filter.command("hermes状态")
+    async def hermes_status(self, event: AstrMessageEvent):
+        path = _cmd_config_path()
+        cfg = self._cfg()
+        chat_model_id = f"{cfg['provider_id']}/{cfg['model']}"
+        try:
+            data = json.loads(path.read_text(encoding="utf-8-sig"))
+            sources = data.get("provider_sources", [])
+            models = data.get("provider", [])
+            settings = data.get("provider_settings", {})
+            source = next((x for x in sources if isinstance(x, dict) and x.get("id") == cfg["provider_id"]), None)
+            model_entry = next((x for x in models if isinstance(x, dict) and x.get("id") == chat_model_id), None)
+            default_id = settings.get("default_provider_id") if isinstance(settings, dict) else ""
+            yield event.plain_result(
+                "Hermes AstrBot 接入状态：\n"
+                f"Provider source: {'已写入' if source else '未写入'} ({cfg['provider_id']})\n"
+                f"模型条目: {'已写入' if model_entry else '未写入'} ({chat_model_id})\n"
+                f"当前默认聊天模型: {default_id or '未设置'}\n"
+                f"是否正在默认使用 Hermes: {'是' if default_id == chat_model_id else '否'}\n"
+                f"Hermes API Base: {cfg['api_base']}\n"
+                "如果不是默认使用 Hermes，执行 /hermes切换默认 后重启 AstrBot。"
+            )
+        except Exception as exc:
+            yield event.plain_result(f"读取 AstrBot 模型配置失败：{type(exc).__name__}: {exc}")
 
     @filter.command("hermes健康")
     async def hermes_health(self, event: AstrMessageEvent):

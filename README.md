@@ -45,9 +45,15 @@ AstrBot 回复 QQ / WebChat
   - `max_tokens`
   - `custom_headers_json`
   - `extra_body_json`
+  - `install_model_entry`
+  - `set_as_default_provider`
+  - `disable_other_chat_models`
+  - `model_modalities_json`
+  - `max_context_tokens`
   - `auto_sync_provider_on_startup`
-- 提供命令把插件配置同步到 AstrBot 的 `provider_sources`
-- 提供 Hermes API 健康检查命令
+- 提供命令把插件配置同步到 AstrBot 的 `provider_sources` 和模型条目 `provider`
+- 可以从插件命令里直接把 AstrBot 默认聊天模型切换成 Hermes，不需要新手去 WebUI 下拉框里找
+- 提供 Hermes API 健康检查和当前默认模型状态检查命令
 - 发布版源码不内置任何真实 URL、Key、Token、密码
 - 不使用已废弃的 `@register` 插件装饰器，依赖 `metadata.yaml` 和 `Star` 子类自动发现，减少新版 AstrBot 兼容性问题
 
@@ -86,9 +92,10 @@ astrbot_plugin_hermes_ecosystem/
 5. 安装本 AstrBot 插件。
 6. 在插件配置页填写 Hermes API 地址、key、模型名。
 7. 在 QQ / WebChat 里执行 `/hermes健康`。
-8. 执行 `/hermes安装提供商`。
-9. 重启 AstrBot。
-10. 在 AstrBot 模型提供商里选择 Hermes provider。
+8. 执行 `/hermes安装提供商`，让 Hermes 出现在 AstrBot 模型列表里。
+9. 如果想直接让机器人主聊天走 Hermes，执行 `/hermes切换默认`。
+10. 重启 AstrBot。
+11. 用 `/hermes状态` 确认默认模型是否已经是 Hermes。
 
 下面详细展开。
 
@@ -382,7 +389,12 @@ Model provider registered: hermes_chat_completion
 | `temperature` | `0.7` | 传给 Hermes API 的 temperature |
 | `max_tokens` | `4096` | 单次回复最大 token |
 | `custom_headers_json` | `{}` | 高级项，自定义请求头；必须是 JSON 对象 |
-| `extra_body_json` | `{}` | 高级项，额外请求体；必须是 JSON 对象 |
+| `extra_body_json` | `{}` | 高级项，额外请求体；必须是 JSON 对象。可以用来传 Hermes API 额外参数，例如 profile |
+| `install_model_entry` | `true` | 同时创建 AstrBot 模型条目 `hermes_agent/hermes-agent`。如果不开，可能只注册了 provider 类型，但 WebUI 模型列表看不到可选模型 |
+| `set_as_default_provider` | `false` | 开启后 `/hermes安装提供商` 会直接把 AstrBot 默认聊天模型改成 Hermes。保守做法是先关着，健康检查通过后执行 `/hermes切换默认` |
+| `disable_other_chat_models` | `false` | 切换默认时是否禁用其它聊天模型。一般不建议开；只有你想强制所有聊天都走 Hermes 时再开 |
+| `model_modalities_json` | `{"items":["text","tool_use"]}` | 写入 AstrBot 模型条目的能力列表。底层 Hermes 模型支持图片时可加入 `image` |
+| `max_context_tokens` | `0` | 写入 AstrBot 模型条目的上下文长度。0 表示不限制；知道底层模型上下文时可填 128000 等 |
 | `auto_sync_provider_on_startup` | `false` | 建议先手动 `/hermes安装提供商`，确认没问题后再考虑开启 |
 
 ## 关于 api_key
@@ -467,32 +479,57 @@ export HERMES_API_KEY='换成你自己的随机长key'
 
 ## `/hermes安装提供商`
 
-把当前插件配置写入 AstrBot `cmd_config.json` 的 `provider_sources`。
+把当前插件配置写入 AstrBot `cmd_config.json`：
+
+- `provider_sources`：写入 Hermes provider source，例如 `id=hermes_agent`、`type=hermes_chat_completion`、`api_base=http://127.0.0.1:8642/v1`。
+- `provider`：写入真正能在 AstrBot 模型列表里看到的模型条目，例如 `hermes_agent/hermes-agent`。
 
 执行成功后会提示类似：
 
 ```text
 Hermes Provider 配置已写入。
-added provider 'hermes_agent' in .../cmd_config.json
-请在 AstrBot WebUI 重启/重载，或重启 AstrBot 服务后，在模型提供商里选择这个 provider。
+added provider source 'hermes_agent', added chat model 'hermes_agent/hermes-agent', default unchanged ...
 ```
 
-然后重启 AstrBot。
+如果你只执行这个命令，Hermes 会出现在 AstrBot 模型列表里，但不一定立刻成为默认聊天模型。
 
----
+## `/hermes切换默认`
 
-# 第 7 步：选择 Hermes 模型提供商
-
-重启 AstrBot 后，在 AstrBot WebUI 的模型提供商 / 模型配置页面里找到：
+把 AstrBot 默认聊天模型直接改成当前插件配置对应的 Hermes 模型：
 
 ```text
-type: hermes_chat_completion
-id: hermes_agent
+provider_source_id: hermes_agent
+model: hermes-agent
+default_provider_id: hermes_agent/hermes-agent
 ```
 
-把它设置为当前使用的模型提供商，或在对应人格 / 会话配置里选择它。
+执行后重启 AstrBot。启动日志应该能看到：
 
-之后 QQ / WebChat 消息就会经过：
+```text
+Loading model hermes_chat_completion(hermes_agent/hermes-agent) ...
+Selected hermes_chat_completion(hermes_agent/hermes-agent) as default chat model provider
+```
+
+这才表示普通 @ 对话真的走 Hermes，而不是其它 Gemini/OpenAI provider。
+
+## `/hermes状态`
+
+检查当前 AstrBot 配置里：
+
+- Hermes provider source 是否已写入
+- Hermes 模型条目是否已写入
+- 当前默认聊天模型是不是 Hermes
+- 当前插件连接的 `api_base` 是什么
+
+## 第 7 步：确认 Hermes 已经成为默认模型
+
+执行 `/hermes状态`，如果看到：
+
+```text
+是否正在默认使用 Hermes: 是
+```
+
+再重启 AstrBot 后测试普通 @ 对话。之后 QQ / WebChat 消息就会经过：
 
 ```text
 AstrBot → hermes_chat_completion → Hermes API Server → Hermes Agent
@@ -519,11 +556,79 @@ AstrBot → hermes_chat_completion → Hermes API Server → Hermes Agent
   "temperature": 0.7,
   "max_tokens": 4096,
   "custom_headers": {},
-  "extra_body": {}
+  "extra_body": {},
+  "models": ["hermes-agent"]
 }
 ```
 
-一般不建议新手手动改，优先用 `/hermes安装提供商`。
+还需要在 `provider` 列表里有模型条目：
+
+```json
+{
+  "id": "hermes_agent/hermes-agent",
+  "enable": true,
+  "provider_source_id": "hermes_agent",
+  "model": "hermes-agent",
+  "modalities": ["text", "tool_use"],
+  "custom_extra_body": {},
+  "max_context_tokens": 0
+}
+```
+
+并且要把默认聊天模型设成：
+
+```json
+"provider_settings": {
+  "default_provider_id": "hermes_agent/hermes-agent"
+}
+```
+
+一般不建议新手手动改，优先用 `/hermes安装提供商` + `/hermes切换默认`。
+
+---
+
+# 自定义 URL、Key 和 Hermes 底层模型怎么切
+
+这里要分清两层：
+
+## A. AstrBot → Hermes API 的连接
+
+这是本插件配置的：
+
+```text
+api_base = http://127.0.0.1:8642/v1
+api_key = Hermes api_server 的 key
+model = hermes-agent
+```
+
+如果 Hermes 和 AstrBot 在同一台机器，推荐 `127.0.0.1`。如果不在同一台机器，改成 Hermes 服务器 IP，并确保 Hermes 绑定 `0.0.0.0` 且端口放行。
+
+## B. Hermes → 底层大模型 provider
+
+这不是在 AstrBot 插件里直接填 OpenAI/Gemini/DeepSeek key，而是在 Hermes 自己里面切：
+
+```bash
+hermes model
+# 或
+hermes setup model
+# 或编辑
+hermes config edit
+```
+
+切完后重启 Hermes Gateway：
+
+```bash
+hermes gateway restart
+```
+
+然后 AstrBot 仍然只连：
+
+```text
+http://127.0.0.1:8642/v1
+model: hermes-agent
+```
+
+好处是：AstrBot 不需要知道底层到底是 Gemini、DeepSeek、OpenRouter 还是本地模型，全部由 Hermes 管。
 
 ---
 
@@ -531,11 +636,12 @@ AstrBot → hermes_chat_completion → Hermes API Server → Hermes Agent
 
 ## 1. 插件装了，但模型列表里没有 Hermes
 
-检查插件是否加载成功：
+注意：只看到日志 `Model provider registered: hermes_chat_completion` 只代表“provider 类型注册成功”，不代表 AstrBot 模型列表里已经有可选模型。
+
+请在插件配置里保持：
 
 ```text
-Loading plugin astrbot_plugin_hermes_ecosystem
-Model provider registered: hermes_chat_completion
+install_model_entry = true
 ```
 
 然后执行：
@@ -544,7 +650,16 @@ Model provider registered: hermes_chat_completion
 /hermes安装提供商
 ```
 
-最后重启 AstrBot。
+再重启 AstrBot。
+
+检查插件是否加载成功：
+
+```text
+Loading plugin astrbot_plugin_hermes_ecosystem
+Model provider registered: hermes_chat_completion
+```
+
+如果还是看不到，执行 `/hermes状态` 看“模型条目”是否为“已写入”。
 
 ## 2. `/hermes健康` 连接失败
 

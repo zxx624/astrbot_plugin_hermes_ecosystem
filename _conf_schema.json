@@ -80,6 +80,41 @@
     "default": "{}",
     "hint": "高级选项。必须是 JSON 对象，会合并到 /chat/completions 请求体里，例如 {\"profile\":\"default\"}。不懂可保持 {}；写错 JSON 时 /hermes配置 会提示。"
   },
+  "install_model_entry": {
+    "description": "同时创建模型条目",
+    "type": "bool",
+    "default": true,
+    "hint": "开启后 /hermes安装提供商 不只写 provider_sources，还会在 AstrBot 模型列表里创建 hermes_agent/hermes-agent，这样 WebUI 下拉列表能看到 Hermes。建议开启。"
+  },
+  "set_as_default_provider": {
+    "description": "安装时设为默认聊天模型",
+    "type": "bool",
+    "default": false,
+    "hint": "开启后 /hermes安装提供商 会把 AstrBot 默认聊天模型直接改成 Hermes。也可以保持关闭，之后手动执行 /hermes切换默认。"
+  },
+  "disable_other_chat_models": {
+    "description": "切换默认时禁用其它聊天模型",
+    "type": "bool",
+    "default": false,
+    "hint": "高级选项。开启后 /hermes切换默认 会把其它 chat 模型条目 enable=false，避免 AstrBot fallback 到别的模型。一般不建议开启，除非你只想让机器人走 Hermes。"
+  },
+  "model_modalities_json": {
+    "description": "模型能力 JSON",
+    "type": "text",
+    "default": "{\"items\":[\"text\",\"tool_use\"]}",
+    "hint": "写入 AstrBot 模型条目的 modalities。默认支持 text 和 tool_use。若 Hermes 底层模型支持图片，可改成 {\"items\":[\"text\",\"image\",\"tool_use\"]}。"
+  },
+  "max_context_tokens": {
+    "description": "最大上下文 tokens",
+    "type": "int",
+    "default": 0,
+    "hint": "写入 AstrBot 模型条目的 max_context_tokens。0 表示不手动限制；如果你知道 Hermes 底层模型上下文，例如 128000，可以填 128000。",
+    "slider": {
+      "min": 0,
+      "max": 1048576,
+      "step": 1024
+    }
+  },
   "auto_sync_provider_on_startup": {
     "description": "启动时自动同步 Provider 配置",
     "type": "bool",
