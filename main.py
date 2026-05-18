@@ -27,6 +27,7 @@ from astrbot.api.star import Context, Star, register
 from astrbot.core.agent.message import ContentPart, Message
 from astrbot.core.agent.tool import ToolSet
 from astrbot.core.message.message_event_result import MessageChain
+from astrbot.core.provider import register as provider_register_module
 from astrbot.core.provider.entities import LLMResponse, ToolCallsResult
 from astrbot.core.provider.register import register_provider_adapter
 
@@ -213,12 +214,24 @@ DEFAULT_PROVIDER_CONFIG = build_provider_config(
 )
 
 
-@register_provider_adapter(
-    PROVIDER_TYPE,
-    "Hermes Agent OpenAI-compatible Chat Completion provider adapter",
-    default_config_tmpl=DEFAULT_PROVIDER_CONFIG.copy(),
-    provider_display_name="Hermes Agent",
-)
+_PROVIDER_ALREADY_REGISTERED = PROVIDER_TYPE in provider_register_module.provider_cls_map
+if not _PROVIDER_ALREADY_REGISTERED:
+    _hermes_provider_decorator = register_provider_adapter(
+        PROVIDER_TYPE,
+        "Hermes Agent OpenAI-compatible Chat Completion provider adapter",
+        default_config_tmpl=DEFAULT_PROVIDER_CONFIG.copy(),
+        provider_display_name="Hermes Agent",
+    )
+else:
+    logger.warning(
+        "Model provider adapter %s is already registered; skip duplicate registration. "
+        "If this happens after plugin reload, restart AstrBot to use updated provider code.",
+        PROVIDER_TYPE,
+    )
+    _hermes_provider_decorator = lambda cls: cls
+
+
+@_hermes_provider_decorator
 class HermesChatCompletionProvider(Provider):
     """Wrap Hermes Agent OpenAI-compatible API as an AstrBot model provider."""
 
@@ -428,7 +441,7 @@ class HermesChatCompletionProvider(Provider):
                     yield LLMResponse("assistant", completion_text=text, is_chunk=True)
 
 
-@register(PLUGIN_NAME, "zxx/hermes", "Connect Hermes Agent to AstrBot as a publishable provider adapter and ecosystem command plugin.", "0.2.1")
+@register(PLUGIN_NAME, "zxx/hermes", "Connect Hermes Agent to AstrBot as a publishable provider adapter and ecosystem command plugin.", "0.2.2")
 class HermesEcosystemPlugin(Star):
     def __init__(self, context: Context, config: dict | None = None):
         super().__init__(context)
