@@ -23,7 +23,7 @@ import httpx
 from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.provider import Provider
-from astrbot.api.star import Context, Star, register
+from astrbot.api.star import Context, Star
 from astrbot.core.agent.message import ContentPart, Message
 from astrbot.core.agent.tool import ToolSet
 from astrbot.core.message.message_event_result import MessageChain
@@ -441,7 +441,6 @@ class HermesChatCompletionProvider(Provider):
                     yield LLMResponse("assistant", completion_text=text, is_chunk=True)
 
 
-@register(PLUGIN_NAME, "zxx/hermes", "Connect Hermes Agent to AstrBot as a publishable provider adapter and ecosystem command plugin.", "0.2.2")
 class HermesEcosystemPlugin(Star):
     def __init__(self, context: Context, config: dict | None = None):
         super().__init__(context)
