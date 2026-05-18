@@ -1,0 +1,9 @@
+name: astrbot_plugin_hermes_ecosystem
+display_name: Hermes 生态接入
+desc: 将 Hermes Agent 的 OpenAI-compatible API 接入 AstrBot；所有 URL、Key、模型名都在插件配置页填写，并可一键同步为 AstrBot 模型提供商。
+version: v0.2.1
+author: zxx/hermes
+repo: ""
+support_platforms:
+  - aiocqhttp
+  - webchat

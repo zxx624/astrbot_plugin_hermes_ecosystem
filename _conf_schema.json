@@ -1,0 +1,89 @@
+{
+  "provider_id": {
+    "description": "Provider ID",
+    "type": "string",
+    "default": "hermes_agent",
+    "hint": "写入 AstrBot provider_sources 时使用的唯一 ID。建议保持 hermes_agent；多个 Hermes 实例可改成 hermes_agent_2。"
+  },
+  "enable_provider": {
+    "description": "启用 Provider",
+    "type": "bool",
+    "default": false,
+    "hint": "执行 /hermes安装提供商 后，会按此开关写入 provider enable。想让 AstrBot 使用 Hermes 时改 true；发布默认 false，避免安装后自动抢默认模型。"
+  },
+  "api_base": {
+    "description": "Hermes API Base URL",
+    "type": "string",
+    "default": "http://127.0.0.1:8642/v1",
+    "hint": "Hermes Gateway api_server 的 OpenAI-compatible 地址。推荐写 http://127.0.0.1:8642/v1；如果误填 http://127.0.0.1:8642，插件会自动补 /v1。AstrBot 与 Hermes 不在同一机器时，把 127.0.0.1 换成 Hermes 所在机器 IP，并确认端口放行。"
+  },
+  "api_key": {
+    "description": "Hermes API Key",
+    "type": "string",
+    "default": "$HERMES_API_KEY",
+    "hint": "Hermes api_server 配置了 key 时填写。没设置 key 可留空；可填真实 key，也可填 $HERMES_API_KEY 让 AstrBot 运行环境变量提供。公网访问强烈建议设置强 key。"
+  },
+  "model": {
+    "description": "模型名",
+    "type": "string",
+    "default": "hermes-agent",
+    "hint": "Hermes API Server 暴露给 OpenAI-compatible 客户端的模型名，默认 hermes-agent。"
+  },
+  "timeout": {
+    "description": "请求超时秒数",
+    "type": "int",
+    "default": 300,
+    "hint": "Hermes 会调用工具/子代理，耗时可能比普通聊天模型长，建议 300-600。若群聊经常超时，可先调到 600。",
+    "slider": {
+      "min": 10,
+      "max": 900,
+      "step": 10
+    }
+  },
+  "streaming_response": {
+    "description": "启用流式响应",
+    "type": "bool",
+    "default": true,
+    "hint": "Hermes API 支持 SSE 时建议开启。若客户端/网关对流式兼容不好可关闭。"
+  },
+  "temperature": {
+    "description": "Temperature",
+    "type": "float",
+    "default": 0.7,
+    "hint": "传给 Hermes /v1/chat/completions 的 temperature。",
+    "slider": {
+      "min": 0,
+      "max": 2,
+      "step": 0.1
+    }
+  },
+  "max_tokens": {
+    "description": "Max Tokens",
+    "type": "int",
+    "default": 4096,
+    "hint": "传给 Hermes API 的 max_tokens。",
+    "slider": {
+      "min": 256,
+      "max": 32768,
+      "step": 256
+    }
+  },
+  "custom_headers_json": {
+    "description": "自定义请求头 JSON",
+    "type": "text",
+    "default": "{}",
+    "hint": "高级选项。必须是 JSON 对象，例如 {\"X-Client\":\"AstrBot\"}。不懂可保持 {}；写错 JSON 时 /hermes配置 会提示。"
+  },
+  "extra_body_json": {
+    "description": "额外请求体 JSON",
+    "type": "text",
+    "default": "{}",
+    "hint": "高级选项。必须是 JSON 对象，会合并到 /chat/completions 请求体里，例如 {\"profile\":\"default\"}。不懂可保持 {}；写错 JSON 时 /hermes配置 会提示。"
+  },
+  "auto_sync_provider_on_startup": {
+    "description": "启动时自动同步 Provider 配置",
+    "type": "bool",
+    "default": false,
+    "hint": "开启后插件加载时自动把当前插件配置写入 cmd_config.json。发布默认 false；建议调好后手动执行 /hermes安装提供商。"
+  }
+}
