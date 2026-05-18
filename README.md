@@ -49,6 +49,7 @@ AstrBot 回复 QQ / WebChat
 - 提供命令把插件配置同步到 AstrBot 的 `provider_sources`
 - 提供 Hermes API 健康检查命令
 - 发布版源码不内置任何真实 URL、Key、Token、密码
+- 不使用已废弃的 `@register` 插件装饰器，依赖 `metadata.yaml` 和 `Star` 子类自动发现，减少新版 AstrBot 兼容性问题
 
 ## 目录结构
 
@@ -65,6 +66,8 @@ astrbot_plugin_hermes_ecosystem/
 ├── main.py
 ├── metadata.yaml
 ├── _conf_schema.json
+├── requirements.txt
+├── LICENSE
 └── README.md
 ```
 
@@ -681,3 +684,16 @@ auto_sync_provider_on_startup = false
 ```
 
 然后重启 AstrBot。
+
+---
+
+# AstrBot 插件市场/发布注意事项
+
+本插件按 AstrBot 新版插件结构发布：
+
+- 插件类继承 `Star`，不依赖已废弃的 `@register` 插件装饰器。
+- 插件元数据以 `metadata.yaml` 为准。
+- `metadata.yaml` 中的 `version` 使用普通版本号，例如 `0.2.3`，Release tag 可以使用 `v0.2.3`。
+- `repo` 指向 GitHub 仓库，方便 AstrBot WebUI/插件市场识别更新来源。
+- `requirements.txt` 只声明第三方依赖，目前为 `httpx`。
+- 打包发布时不要包含 `__pycache__`、`.pyc`、`.bak`、本地配置文件、真实 key 或生成的 zip。
