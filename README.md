@@ -693,7 +693,12 @@ auto_sync_provider_on_startup = false
 
 - 插件类继承 `Star`，不依赖已废弃的 `@register` 插件装饰器。
 - 插件元数据以 `metadata.yaml` 为准。
-- `metadata.yaml` 中的 `version` 使用普通版本号，例如 `0.2.3`，Release tag 可以使用 `v0.2.3`。
+- `metadata.yaml` 中的 `version` 使用普通版本号，例如 `0.2.4`，Release tag 可以使用 `v0.2.4`。
 - `repo` 指向 GitHub 仓库，方便 AstrBot WebUI/插件市场识别更新来源。
 - `requirements.txt` 只声明第三方依赖，目前为 `httpx`。
 - 打包发布时不要包含 `__pycache__`、`.pyc`、`.bak`、本地配置文件、真实 key 或生成的 zip。
+
+
+## 热重载说明
+
+AstrBot 热重载插件时，Provider 适配器可能已经存在。插件会自动替换同名的旧 `hermes_chat_completion` 适配器，避免重复注册报错或继续使用旧代码。

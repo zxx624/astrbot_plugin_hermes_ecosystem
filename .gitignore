@@ -1,11 +1,8 @@
 __pycache__/
 *.py[cod]
-*.pyo
-*.bak*
+*.bak
+*.backup
+*.log
 .env
 .venv/
-venv/
-dist/
-build/
-*.zip
 .DS_Store

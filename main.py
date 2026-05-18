@@ -214,24 +214,32 @@ DEFAULT_PROVIDER_CONFIG = build_provider_config(
 )
 
 
-_PROVIDER_ALREADY_REGISTERED = PROVIDER_TYPE in provider_register_module.provider_cls_map
-if not _PROVIDER_ALREADY_REGISTERED:
-    _hermes_provider_decorator = register_provider_adapter(
-        PROVIDER_TYPE,
-        "Hermes Agent OpenAI-compatible Chat Completion provider adapter",
-        default_config_tmpl=DEFAULT_PROVIDER_CONFIG.copy(),
-        provider_display_name="Hermes Agent",
-    )
-else:
-    logger.warning(
-        "Model provider adapter %s is already registered; skip duplicate registration. "
-        "If this happens after plugin reload, restart AstrBot to use updated provider code.",
-        PROVIDER_TYPE,
-    )
-    _hermes_provider_decorator = lambda cls: cls
+def _unregister_stale_provider_adapter(provider_type: str) -> None:
+    """Remove a previously registered adapter with the same type during plugin reload.
+
+    AstrBot keeps provider adapters in process-global registries. When a plugin is
+    hot-reloaded, the old adapter entry can remain there and make the next import
+    fail or force us to keep using stale provider code. Replacing our own adapter
+    is safer than silently skipping registration.
+    """
+    old_meta = provider_register_module.provider_cls_map.pop(provider_type, None)
+    if old_meta is None:
+        return
+    provider_register_module.provider_registry[:] = [
+        meta for meta in provider_register_module.provider_registry if getattr(meta, "type", None) != provider_type
+    ]
+    logger.info("Replaced stale model provider adapter during plugin reload: %s", provider_type)
 
 
-@_hermes_provider_decorator
+_unregister_stale_provider_adapter(PROVIDER_TYPE)
+
+
+@register_provider_adapter(
+    PROVIDER_TYPE,
+    "Hermes Agent OpenAI-compatible Chat Completion provider adapter",
+    default_config_tmpl=DEFAULT_PROVIDER_CONFIG.copy(),
+    provider_display_name="Hermes Agent",
+)
 class HermesChatCompletionProvider(Provider):
     """Wrap Hermes Agent OpenAI-compatible API as an AstrBot model provider."""
 
