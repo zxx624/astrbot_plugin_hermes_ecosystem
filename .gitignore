@@ -1,14 +1,11 @@
 __pycache__/
 *.py[cod]
 *.pyo
-*.pyd
-.Python
+*.bak*
 .env
 .venv/
 venv/
-build/
 dist/
-*.egg-info/
+build/
+*.zip
 .DS_Store
-*.bak
-*.bak.*
